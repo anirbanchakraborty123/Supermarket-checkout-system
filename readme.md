@@ -14,6 +14,7 @@ This project is a REST API for a Supermarket Checkout System built with Django a
 - Python 3.8+
 - pip
 - virtualenv
+- redis
 
 ## Getting Started
 

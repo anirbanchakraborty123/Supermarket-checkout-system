@@ -30,7 +30,6 @@ class PricingRuleViewSet(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class CheckoutViewSet(viewsets.ViewSet):
     """
     A ViewSet for managing the checkout process, including scanning items and calculating totals.
@@ -67,12 +66,16 @@ class CheckoutViewSet(viewsets.ViewSet):
         - 404 Not Found: {"error": "Item not found"}
         """
         serializer = ScanItemSerializer(data=request.data)
-        if serializer.is_valid():
-            sku = serializer.validated_data['sku']
-            item = Item.objects.get(sku=sku)  # We already know this exists from validation
-            self.checkout.scan(item)
-            return Response({"message": f"Item {sku} scanned"}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            if serializer.is_valid():
+                sku = serializer.validated_data['sku']
+                item = Item.objects.get(sku=sku)  # We already know this exists from validation
+                self.checkout.scan(item)
+                return Response({"message": f"Item {sku} scanned"}, status=status.HTTP_200_OK)
+        except Item.DoesNotExist:
+            return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
     def total(self, request):
@@ -82,5 +85,8 @@ class CheckoutViewSet(viewsets.ViewSet):
         Responses:
         - 200 OK: {"total": 130.00}
         """
-        total_price = self.checkout.total()
-        return Response({"total": total_price}, status=status.HTTP_200_OK)
+        try:
+            total_price = self.checkout.total()
+            return Response({"total": total_price}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": f"Error calculating total: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

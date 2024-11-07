@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 # Third-party imports
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -32,15 +33,19 @@ class PricingRuleViewSet(APIView):
 
 class CheckoutViewSet(viewsets.ViewSet):
     """
-    A ViewSet for managing the checkout process, including scanning items and calculating totals.
+    ViewSet for managing the checkout process with Redis session management.
     """
-    
-    def __init__(self, **kwargs):
+
+    def initialize_checkout(self, request):
         """
-        Initializes the view set and sets up the checkout instance with current pricing rules.
+        Initializes the checkout instance and retrieves or sets the cart in the session.
+
+        Args:
+            request (Request): The incoming HTTP request.
+
+        Returns:
+            CheckOut: A checkout instance with pricing rules loaded.
         """
-        super().__init__(**kwargs)
-        # Set up pricing rules for CheckOut
         pricing_rules = {
             rule.item.sku: {
                 'quantity': rule.quantity,
@@ -48,45 +53,78 @@ class CheckoutViewSet(viewsets.ViewSet):
             }
             for rule in PricingRule.objects.filter(status=True)
         }
-        self.checkout = CheckOut(pricing_rules)
+        checkout = CheckOut(pricing_rules)
+
+        # Retrieve cart from session or initialize empty cart
+        cart = request.session.get('cart', {})
+        for sku, details in cart.items():
+            item = get_object_or_404(Item, sku=sku)
+            for _ in range(details['count']):
+                checkout.scan(item)
+        return checkout
+
+    def update_session_cart(self, request, checkout):
+        """
+        Updates the session cart data with the current state of the checkout.
+
+        Args:
+            request (Request): The HTTP request object.
+            checkout (CheckOut): The checkout instance to save.
+        """
+        cart_data = {sku: {'count': details['count']} for sku, details in checkout.cart.items()}
+        request.session['cart'] = cart_data
+        request.session.modified = True
 
     @action(detail=False, methods=['post'])
     def scan(self, request):
         """
-        Endpoint to scan an item and add it to the checkout cart.
+        API endpoint to scan an item and add it to the checkout session.
 
-        Expected Payload:
-        {
-            "sku": "A"
-        }
+        Payload:
+            {"sku": "A"}
 
-        Responses:
-        - 200 OK: {"message": "Item A scanned"}
-        - 400 Bad Request: {"error": "Item with this SKU does not exist."}
-        - 404 Not Found: {"error": "Item not found"}
+        Response:
+            Success: {"message": "Item A scanned"}
+            Error: {"error": "Item not found"} or {"error": "Invalid SKU provided"}
         """
         serializer = ScanItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
         try:
-            if serializer.is_valid():
-                sku = serializer.validated_data['sku']
-                item = Item.objects.get(sku=sku)  # We already know this exists from validation
-                self.checkout.scan(item)
-                return Response({"message": f"Item {sku} scanned"}, status=status.HTTP_200_OK)
+            sku = serializer.validated_data['sku']
+            item = Item.objects.get(sku=sku)
+            checkout = self.initialize_checkout(request)
+            checkout.scan(item)
+            self.update_session_cart(request, checkout)
+            return Response({"message": f"Item {sku} scanned"}, status=status.HTTP_200_OK)
         except Item.DoesNotExist:
             return Response({"error": "Item not found"}, status=status.HTTP_404_NOT_FOUND)
-        except Exception:
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
     def total(self, request):
         """
-        Endpoint to calculate the total price of all scanned items.
+        API endpoint to retrieve the total price of all items in the session.
 
-        Responses:
-        - 200 OK: {"total": 130.00}
+        Response:
+            Success: {"total": 130.0}
+            Error: {"error": "Error calculating total"}
         """
         try:
-            total_price = self.checkout.total()
+            checkout = self.initialize_checkout(request)
+            total_price = checkout.total()
             return Response({"total": total_price}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": f"Error calculating total: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def clear(self, request):
+        """
+        Clears the checkout session data.
+        
+        Response:
+            200 OK: {"message": "Checkout session cleared"}
+        """
+        request.session.pop('cart', None)
+        return Response({"message": "Checkout session cleared"}, status=status.HTTP_200_OK)

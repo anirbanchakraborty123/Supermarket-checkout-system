@@ -117,5 +117,4 @@ The following endpoints are available for the checkout process:
 ---
 
 ## Notes
-- Currently, state is managed in-memory for each checkout session. For production, we can consider persisting session data in a database or we can use Django’s session framework for scalability.
 - The project uses SQLite by default. For production, we can configure a more robust database like PostgreSQL.

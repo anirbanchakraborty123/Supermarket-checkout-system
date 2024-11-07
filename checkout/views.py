@@ -47,7 +47,7 @@ class CheckoutViewSet(viewsets.ViewSet):
                 'quantity': rule.quantity,
                 'special_price': rule.special_price
             }
-            for rule in PricingRule.objects.all()
+            for rule in PricingRule.objects.filter(status=True)
         }
         self.checkout = CheckOut(pricing_rules)
 

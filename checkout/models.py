@@ -12,6 +12,7 @@ class PricingRule(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     special_price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.BooleanField(default= False)
 
     def __str__(self):
         return f"{self.item.sku} - {self.quantity} for ${self.special_price}"
